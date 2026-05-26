@@ -1,49 +1,105 @@
+import os
+
 from flask import Flask
 from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
+from datetime import timedelta
+
+from extensions import db, migrate, jwt
 
 
-app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///database.db"
-db = SQLAlchemy(app)
-migrate = Migrate(app, db)
+def create_app():
+    app = Flask(__name__)
 
-# JWT conf
-from flask_jwt_extended import JWTManager
-app.config["JWT_SECRET_KEY"] = "fyujvkyxbhvfjnxfgdbvkx,jvxhjbkjmhv"  # Change this!
-jwt = JWTManager(app)
-# the time for token to expire
+    # =========================
+    # APP CONFIGURATION
+    # =========================
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///database.db"
+
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    app.config["SECRET_KEY"] = os.environ.get(
+        "SECRET_KEY",
+        "super-secret-key"
+    )
+
+    # JWT CONFIG
+    app.config["JWT_SECRET_KEY"] = os.environ.get(
+        "JWT_SECRET_KEY",
+        "jwt-super-secret-key"
+    )
+
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
+
+    # =========================
+    # INITIALIZE EXTENSIONS
+    # =========================
+    db.init_app(app)
+    migrate.init_app(app, db)
+    jwt.init_app(app)
+
+    CORS(app)
+
+    # =========================
+    # IMPORT MODELS
+    # =========================
+    from models import TokenBlocklist
+
+    # =========================
+    # IMPORT BLUEPRINTS
+    # =========================
+    from views.user import user_bp
+    from views.post import post_bp
+    from views.comment import comment_bp
+    from views.auth import auth_bp
+
+    # =========================
+    # REGISTER BLUEPRINTS
+    # =========================
+    app.register_blueprint(user_bp)
+    app.register_blueprint(post_bp)
+    app.register_blueprint(comment_bp)
+    app.register_blueprint(auth_bp)
+
+    # =========================
+    # JWT BLOCKLIST CHECKER
+    # =========================
+    @jwt.token_in_blocklist_loader
+    def check_if_token_revoked(jwt_header, jwt_payload):
+
+        jti = jwt_payload["jti"]
+
+        token = db.session.query(
+            TokenBlocklist.id
+        ).filter_by(
+            jti=jti
+        ).scalar()
+
+        return token is not None
+
+    # =========================
+    # HOME ROUTE
+    # =========================
+    @app.route("/")
+    def home():
+        return {
+            "message": "Flask API is running successfully"
+        }
+
+    return app
 
 
-CORS(app)
-app.secret_key = "sehtrsdyhndtejdydunuyehbdrvteryhe"
-
-# models
-import models
-
-# views
-from views import *
+# =========================
+# CREATE APP INSTANCE
+# =========================
+app = create_app()
 
 
-# REgistering Blueprints
-app.register_blueprint(user_bp)
-app.register_blueprint(post_bp)
-app.register_blueprint(comment_bp)
-app.register_blueprint(auth_bp)
-
-
-
-# Callback function to check if a JWT exists in the database blocklist
-from models import TokenBlocklist
-
-@jwt.token_in_blocklist_loader
-def check_if_token_revoked(jwt_header, jwt_payload: dict) -> bool:
-    jti = jwt_payload["jti"]
-    token = db.session.query(TokenBlocklist.id).filter_by(jti=jti).scalar()
-
-    return token is not None
-
-# export FLASK_APP=app.py
-# export FLASK_DEBUG=1
-
+# =========================
+# RUN SERVER
+# =========================
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=True
+    )

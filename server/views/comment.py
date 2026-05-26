@@ -1,15 +1,18 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from app import db
+from extensions import db
 from models import Comment, Post
 
 comment_bp = Blueprint("comment_bp", __name__)
 
 
-# READ ALL COMMENTS
-@comment_bp.route("/comments")
+# ==================== COMMENT CRUD OPERATIONS =============================
+
+# READ: Fetch all comments
+@comment_bp.route("/comments", methods=["GET"])
 def fetch_comments():
+
     comments = Comment.query.all()
 
     results = []
@@ -17,7 +20,7 @@ def fetch_comments():
     for comment in comments:
         results.append({
             "id": comment.id,
-            "message": comment.message,
+            "content": comment.content,
             "post_id": comment.post_id,
             "user_id": comment.user_id
         })
@@ -25,21 +28,29 @@ def fetch_comments():
     return jsonify(results), 200
 
 
-# CREATE COMMENT
+# CREATE: Add a new comment
 @comment_bp.route("/comments", methods=["POST"])
 @jwt_required()
 def add_comment():
-    data = request.get_json()
 
-    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
 
-    post = Post.query.get(data["post_id"])
+    if not data.get("content") or not data.get("post_id"):
+        return jsonify({
+            "error": "Missing required fields"
+        }), 400
+
+    current_user_id = int(get_jwt_identity())
+
+    post = db.session.get(Post, data["post_id"])
 
     if not post:
-        return jsonify({"error": "Post does not exist"}), 404
+        return jsonify({
+            "error": "Post does not exist"
+        }), 404
 
     new_comment = Comment(
-        message=data["message"],
+        content=data["content"],
         post_id=data["post_id"],
         user_id=current_user_id
     )
@@ -51,69 +62,62 @@ def add_comment():
         "success": "Comment created successfully",
         "comment": {
             "id": new_comment.id,
-            "message": new_comment.message,
+            "content": new_comment.content,
             "post_id": new_comment.post_id,
             "user_id": new_comment.user_id
         }
     }), 201
 
 
-# READ ONE COMMENT
-@comment_bp.route("/comments/<int:id>")
+# READ: Fetch single comment
+@comment_bp.route("/comments/<int:id>", methods=["GET"])
 def fetch_comment(id):
-    comment = Comment.query.get(id)
+
+    comment = db.session.get(Comment, id)
 
     if not comment:
-        return jsonify({"error": "Comment does not exist"}), 404
+        return jsonify({
+            "error": "Comment not found"
+        }), 404
 
     return jsonify({
         "id": comment.id,
-        "message": comment.message,
+        "content": comment.content,
         "post_id": comment.post_id,
         "user_id": comment.user_id
     }), 200
 
 
 # UPDATE COMMENT
-@comment_bp.route("/comments/<int:id>", methods=["PUT"])
+@comment_bp.route("/comments/<int:id>", methods=["PUT", "PATCH"])
 @jwt_required()
 def update_comment(id):
-    comment = Comment.query.get(id)
+
+    comment = db.session.get(Comment, id)
 
     if not comment:
-        return jsonify({"error": "Comment does not exist"}), 404
+        return jsonify({
+            "error": "Comment not found"
+        }), 404
 
-    current_user_id = get_jwt_identity()
+    current_user_id = int(get_jwt_identity())
 
-    # check owner
     if comment.user_id != current_user_id:
         return jsonify({
-            "error": "You are not allowed to update this comment"
+            "error": "Unauthorized"
         }), 403
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
-    # VALIDATE POST
-    if "post_id" in data:
-        post = Post.query.get(data["post_id"])
-
-        if not post:
-            return jsonify({"error": "Post does not exist"}), 404
-
-        comment.post_id = data["post_id"]
-
-    comment.message = data.get("message", comment.message)
+    comment.content = data.get(
+        "content",
+        comment.content
+    )
 
     db.session.commit()
 
     return jsonify({
-        "success": "Comment updated successfully",
-        "comment": {
-            "id": comment.id,
-            "message": comment.message,
-            "post_id": comment.post_id,
-            "user_id": comment.user_id
-        }
+        "success": "Comment updated successfully"
     }), 200
 
 
@@ -121,18 +125,19 @@ def update_comment(id):
 @comment_bp.route("/comments/<int:id>", methods=["DELETE"])
 @jwt_required()
 def delete_comment(id):
-    comment = Comment.query.get(id)
+
+    comment = db.session.get(Comment, id)
 
     if not comment:
         return jsonify({
-            "error": "The comment you want to delete does not exist"
+            "error": "Comment not found"
         }), 404
 
-    current_user_id = get_jwt_identity()
+    current_user_id = int(get_jwt_identity())
 
     if comment.user_id != current_user_id:
         return jsonify({
-            "error": "You are not allowed to delete this comment"
+            "error": "Unauthorized"
         }), 403
 
     db.session.delete(comment)

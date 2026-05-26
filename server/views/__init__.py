@@ -1,4 +1,1 @@
-from .user import user_bp
-from .post import post_bp
-from .comment import comment_bp
-from .auth import auth_bp
+# Blueprints are imported directly in app.py to avoid circular imports
